@@ -1,0 +1,1466 @@
+<!DOCTYPE HTML>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>birddy slop</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        body{
+            margin: 0;
+            padding: 0;
+            background-color: #1a202c;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container 
+        {
+            position: relative;
+            box-shadow: 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            border-radius: 16px;
+            overflow: hidden;
+            background: #70c5ce;
+        }
+        canvas {
+            display: block;
+            background-color: #70c5ce;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext('2d');
+
+        const GAME_WIDTH = 400;
+        const GAME_HEIGHT = 600;
+
+        canvas.width = GAME_WIDTH;
+        canvas.height = GAME_HEIGHT;
+
+        function resizeContainer() {
+            const scale = Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT);
+            canvas.style.width = `${GAME_WIDTH * scale}px`;
+            canvas.style.height = `${GAME_HEIGHT * scale}px`;
+        }
+        window.addEventListener('resize', resizeContainer);
+        window.addEventListener('orientationchange', resizeContainer);
+        resizeContainer();
+
+        // Cập nhật danh sách trạng thái UI
+        const STATES = {
+            DISCLAIMER: 'DISCLAIMER',
+            INTRO: 'INTRO',
+            START: 'START',
+            HOW_TO_PLAY: 'HOW_TO_PLAY',
+            MODE_SELECT: 'MODE_SELECT',
+            PLAYING: 'PLAYING',
+            PAUSED: 'PAUSED',
+            GAMEOVER: 'GAMEOVER',
+            VICTORY: 'VICTORY'
+        };
+
+        // Cấu hình các chế độ chơi
+        const MODES = {
+            EASY: { name: 'EASY', birdScore: 5, bossScore: 8, bossHp: 5, isBossOnly: false },
+            MEDIUMS: { name: 'MEDIUMS', birdScore: 8, bossScore: 13, bossHp: 10, isBossOnly: false },
+            HARDS: { name: 'HARDS', birdScore: 15, bossScore: 23, bossHp: 15, isBossOnly: false },
+            BOSS_ONLY: { name: 'BOSS ONLY', birdScore: 0, bossScore: 0, bossHp: 15, isBossOnly: true }
+        };
+        let currentMode = MODES.MEDIUMS;
+
+        let disclaimerAlpha = 0;
+        let disclaimerPhase = 'fadein';
+        let disclaimerTimer = 0;
+
+        function updateDisclaimer() {
+            if (disclaimerPhase === 'fadein') {
+                disclaimerAlpha += 0.02;
+                if(disclaimerAlpha >= 1) {
+                    disclaimerAlpha = 1;
+                    disclaimerPhase = 'hold';
+                }
+            } else if(disclaimerPhase === 'hold') {
+                disclaimerTimer++;
+                if(disclaimerTimer > 120){
+                    disclaimerPhase = 'fadeout';
+                }
+            } else if(disclaimerPhase === 'fadeout') {
+                disclaimerAlpha -= 0.02;
+                if(disclaimerAlpha <= 0){
+                    disclaimerAlpha = 0;
+                    currentState = STATES.START;
+                }
+            }
+        }
+
+        function drawDisclaimer() {
+            ctx.save();
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            ctx.fillStyle = `rgba(255, 255, 255, ${disclaimerAlpha})`;
+            ctx.font = 'bold 15px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("!!!DISCLAIMER!!!", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40);
+            ctx.font = '13px Arial';
+            ctx.fillStyle = `rgba(200, 200, 200, ${disclaimerAlpha})`;
+            ctx.fillText("Trò chơi này chỉ mang tính giải trí,", GAME_WIDTH / 2, GAME_HEIGHT / 2);
+            ctx.fillText("mọi hành động đập phá thiết bị đều do bạn tự chịu trách nhiệm!", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 25);
+            ctx.fillText("Có sự hỗ trợ của AI trong quá trình tạo ảnh!", GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50);
+            ctx.restore();
+        }
+
+        let introAlpha = 0;
+        let introPhase = 'fadein';
+        let introTimer = 0;
+        const iconImg = new Image();
+        iconImg.src = "icon.png";
+
+        function updateIntro() {
+            if (introPhase === 'fadein') {
+                introAlpha += 0.02;
+                if (introAlpha >= 1) {
+                    introAlpha = 1;
+                    introPhase = 'hold';
+                }
+            } else if (introPhase === 'hold') {
+                introTimer++;
+                if (introTimer > 120) {
+                    introPhase = 'fadeout';
+                }
+            } else if (introPhase === 'fadeout') {
+                introAlpha -= 0.02;
+                if (introAlpha <= 0) {
+                    introAlpha = 0;
+                    currentState = STATES.DISCLAIMER;
+                }
+            }
+        }
+
+        function drawIntro() {
+            ctx.save();
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            ctx.globalAlpha = introAlpha;
+            if (iconImg.complete && iconImg.naturalWidth > 0) {
+                const size = 200;
+                ctx.drawImage(iconImg, (GAME_WIDTH - size) / 2, GAME_HEIGHT / 2 - 115, size, size);
+            }
+            ctx.restore();
+        }
+
+        let currentState = STATES.INTRO;
+        let score = 0;
+        let highScore = localStorage.getItem('flappy_high_score') || 0;
+        let frameCount = 0;
+
+        const birdImg = new Image();
+        birdImg.src = "character.png";
+        const birdJumpImg = new Image();
+        birdJumpImg.src = "flapping frame.png";   
+        const birdParryImg = new Image();
+        birdParryImg.src = "parry frame.png"; 
+        const missParry = new Image();
+        missParry.src = "miss parry frame.png"; 
+        const birdhitted = new Image();
+        birdhitted.src = "hitted frame.png"; 
+        const deathFrame1 = new Image();
+        deathFrame1.src = "death frame1.png";
+        const deathFrame2 = new Image();
+        deathFrame2.src = "death frame2.png";
+        const laserFrames = [];
+        for (let i = 1; i <= 16; i++) {
+            const img = new Image();
+            img.src = `${i}.png`;
+            laserFrames.push(img);
+        }
+        const bossImg = new Image();
+        bossImg.src = "boss.png";
+
+        const projectileImg = new Image();
+        projectileImg.src = "projectile.png";
+
+        const bgImg = new Image();
+        bgImg.src = "background.png";
+        
+        const darkKnightImg = new Image();
+        darkKnightImg.src = "the fucking bird.png";
+
+        const click_sound = new Audio('click sound.mp3');
+        click_sound.volume = 0.5;
+        const birdSpawnSound = new Audio('warning sound.mp3');
+        birdSpawnSound.volume = 0.5;
+        const boss_laser_spawnSound = new Audio('limbus-company-coin.mp3');
+        boss_laser_spawnSound.volume = 1.0;
+        const parrySound = new Audio('parry sound.mp3');
+
+        const mouse_await = new Audio('click-short.wav');
+        mouse_await.volume = 0.4;
+        const menu_clicked = new Audio('pause-back-click.wav');
+        menu_clicked.volume = 0.4;
+
+        function playSFX(audioObj) {
+            if (!audioObj) return;
+            const sound = audioObj.cloneNode();
+            sound.volume = audioObj.volume;
+            sound.play().catch(e => {});
+        }
+
+        const backgroundSoundTrack = new Audio('backGround.mp3');
+        backgroundSoundTrack.volume = 0.5;
+        backgroundSoundTrack.loop = true;
+        const boss_music_SoundTrack = new Audio('bossFight.mp3');
+        boss_music_SoundTrack.volume = 0.5;
+        boss_music_SoundTrack.loop = true;
+        const fail_soundtrack = new Audio('failsound.mp3');
+        fail_soundtrack.volume = 0.5;
+        fail_soundtrack.loop = true;
+
+        class AudioManager {
+            constructor() {
+                this.normalBGM = backgroundSoundTrack;
+                this.bossBGM = boss_music_SoundTrack;
+                this.failBGM = fail_soundtrack;
+                this.transitioning = false;
+            }
+
+            playNormalMusic() {
+                if(this.normalBGM) {
+                    this.normalBGM.volume = 0.5;
+                    this.normalBGM.play().catch(e => {});
+                }
+            }
+
+            playFailMusic() {
+                this.pauseMusic();
+                if(this.failBGM) {
+                    this.failBGM.currentTime = 0;
+                    this.failBGM.play().catch(e => {});
+                }
+            }
+
+            pauseMusic() {
+                if(this.normalBGM) this.normalBGM.pause();
+                if(this.bossBGM) this.bossBGM.pause();
+            }
+
+            resumeMusic() {
+                if (boss.active) {
+                    if(this.bossBGM) this.bossBGM.play().catch(e => {});
+                } else {
+                    if(this.normalBGM) this.normalBGM.play().catch(e => {});
+                }
+            }
+
+            transitionToBossMusic() {
+                if (this.transitioning || !this.normalBGM || !this.bossBGM) return;
+                this.transitioning = true;
+
+                let fadeOutDuration = 1500;
+                let intervalTime = 50;
+                let step = (this.normalBGM.volume || 0.5) / (fadeOutDuration / intervalTime);
+
+                let fadeOutInterval = setInterval(() => {
+                    if (this.normalBGM.volume > step) {
+                        this.normalBGM.volume -= step;
+                    } else {
+                        this.normalBGM.volume = 0;
+                        this.normalBGM.pause();
+                        clearInterval(fadeOutInterval);
+
+                        this.bossBGM.volume = 0;
+                        this.bossBGM.play().then(() => {
+                            this.fadeInBossMusic();
+                        }).catch(err => console.log("Audio play blocked:", err));
+                    }
+                }, intervalTime);
+            }
+
+            fadeInBossMusic() {
+                let fadeInDuration = 1500;
+                let intervalTime = 50;
+                let step = 0.6 / (fadeInDuration / intervalTime);
+
+                let fadeInInterval = setInterval(() => {
+                    if (this.bossBGM.volume < 0.6 - step) {
+                        this.bossBGM.volume += step;
+                    } else {
+                        this.bossBGM.volume = 0.6;
+                        clearInterval(fadeInInterval);
+                    }
+                }, intervalTime);
+            }
+
+            resetMusic() {
+                if(this.bossBGM) { this.bossBGM.pause(); this.bossBGM.currentTime = 0; }
+                if(this.normalBGM) { this.normalBGM.pause(); this.normalBGM.currentTime = 0; }
+                if(this.failBGM) { this.failBGM.pause(); this.failBGM.currentTime = 0; }
+                this.transitioning = false;
+            }
+        }
+        const audioMgr = new AudioManager();
+
+        const GRAVITY = 0.35;
+        const FLAP_SPEED = 2.2;
+        const PIPE_SPEED = 3;
+        const FLAP_STRENGTH = -6.8;
+        const PIPE_SPAWN_RATE = 100;
+        const GAP_SIZE = 185;
+
+        let bird = {
+            x: 50, 
+            y: 150, 
+            width: 40, 
+            height: 30, 
+            velocity: 0, 
+            rotation: 0,
+            radius: 12,
+            parryCooldown: 0,
+            parryAnimTimer: 0,
+            missParryAnimTimer: 0,
+            hitAnimTimer: 0,
+            deathAnimTimer: 0,
+            isDead: false,
+
+            flap() {
+                if (this.isDead) return;
+                this.velocity = FLAP_STRENGTH;
+                const sound = click_sound.cloneNode();
+                sound.volume = 0.5;
+                sound.play().catch(e => {});
+            },
+            reset() {
+                this.y = 250;
+                this.velocity = 0;
+                this.rotation = 0;
+                this.parryCooldown = 0;
+                this.parryAnimTimer = 0;
+                this.missParryAnimTimer = 0;
+                this.hitAnimTimer = 0;
+                this.deathAnimTimer = 0;
+                this.isDead = false;
+            },
+            update() {
+                if (this.isDead) {
+                    this.velocity += GRAVITY;
+                    this.y += this.velocity;
+                    this.rotation += 5 * Math.PI / 180;
+                    if (this.deathAnimTimer > 0) this.deathAnimTimer--;
+                    return;
+                }
+
+                this.velocity += GRAVITY;
+                this.y += this.velocity;
+                if(this.velocity < 0) {
+                    this.rotation = -25 * Math.PI / 180;
+                } else {
+                    this.rotation += 3 * Math.PI / 180;
+                    if(this.rotation > 70 * Math.PI / 180) {
+                        this.rotation = 70 * Math.PI / 180;
+                    }
+                }
+                if (this.parryCooldown > 0) this.parryCooldown--;
+                if (this.parryAnimTimer > 0) this.parryAnimTimer--;
+                if (this.missParryAnimTimer > 0) this.missParryAnimTimer--;
+                if (this.hitAnimTimer > 0) this.hitAnimTimer--;
+            },
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+                ctx.rotate(this.rotation);
+
+                let currentImg = birdImg;
+                if (this.isDead && this.deathAnimTimer > 0) {
+                    currentImg = (Math.floor(this.deathAnimTimer / 8) % 2 === 0) ? deathFrame1 : deathFrame2;
+                    if (!currentImg.complete || currentImg.naturalWidth === 0) {
+                        currentImg = birdhitted.complete && birdhitted.naturalWidth > 0 ? birdhitted : birdImg;
+                    }
+                } else if (this.hitAnimTimer > 0 && birdhitted.complete && birdhitted.naturalWidth > 0) {
+                    currentImg = birdhitted;
+                } else if (this.missParryAnimTimer > 0 && missParry.complete && missParry.naturalWidth > 0) {
+                    currentImg = missParry;
+                } else if (this.parryAnimTimer > 0 && birdParryImg.complete && birdParryImg.naturalWidth > 0) {
+                    currentImg = birdParryImg;
+                } else if (this.velocity < 0 && birdJumpImg.complete && birdJumpImg.naturalWidth > 0) {
+                    currentImg = birdJumpImg;
+                } 
+
+                ctx.drawImage(currentImg, -this.width / 2, -this.height / 2, this.width, this.height);
+                ctx.restore();
+            }
+        };
+
+        let dangerZones = [];
+        let projectiles = [];
+
+        let screenShakeTimer = 0;
+        let screenShakeMagnitude = 0;
+        function triggerScreenShake(duration = 15, magnitude = 4){
+            screenShakeTimer = duration;
+            screenShakeMagnitude = magnitude;
+        }
+
+        class ScreenLaser {
+            constructor(x, y, width, height, warningDuration) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.warningTimer = warningDuration;
+                this.isFiring = false;
+                this.currentFrame = 0;
+                this.frameTimer = 0;
+                this.frameDuration = 2;
+            }
+            update() {
+                if (!this.isFiring) {
+                    this.warningTimer--;
+                    if (this.warningTimer <= 0) {
+                        this.isFiring = true;
+                        this.currentFrame = 0;
+                        triggerScreenShake(25, 5);
+                    }
+                } else {
+                    this.frameTimer++;
+                    if (this.frameTimer >= this.frameDuration) {
+                        this.frameTimer = 0;
+                        this.currentFrame++;
+                    }
+                }
+            }
+            isFinished() {
+                return this.isFiring && this.currentFrame >= laserFrames.length;
+            }
+            checkCollision(target) {
+                if (!this.isFiring) return false;
+                return (
+                    target.x < this.x + this.width &&
+                    target.x + target.width > this.x &&
+                    target.y < this.y + this.height &&
+                    target.y + target.height > this.y
+                );
+            }
+
+            draw(ctx) {
+                if (!this.isFiring) {
+                    let alpha = 0.3 + 0.2 * Math.sin(this.warningTimer * 0.5);
+                    ctx.fillStyle = `rgba(255, 0, 0, ${alpha})`;
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                    
+                    ctx.strokeStyle = "red";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(this.x, this.y, this.width, this.height);
+                } else {
+                    if (this.currentFrame < laserFrames.length) {
+                        let img = laserFrames[this.currentFrame];
+                        ctx.save();
+                        if (img.complete && img.naturalWidth > 0) {
+                            ctx.drawImage(img, this.x, this.y, this.width, this.height);
+                        } else {
+                            ctx.fillStyle = '#ff0000';
+                            ctx.fillRect(this.x, this.y, this.width, this.height);
+                        }
+                        ctx.restore();
+                    }
+                }
+            }
+        }
+
+        class Boss {
+            constructor(x, y) {
+                this.x = x;
+                this.targetY = y; 
+                this.y = -120;
+                this.width = 100;
+                this.height = 100;
+                this.state = "INTRO"; 
+                this.introTimer = 0;
+                this.hp = 20;
+                this.maxHp = 20;
+                this.active = false;
+                this.attackTimer = 0;
+            }
+
+            spawnBoss() {
+                this.active = true;
+                this.state = "INTRO";
+                this.x = GAME_WIDTH - 120;
+                this.targetY = 150;
+                this.y = -120;
+                this.introTimer = 0;
+                this.maxHp = currentMode.bossHp;
+                this.hp = this.maxHp;
+                audioMgr.transitionToBossMusic();
+            }
+
+            castScreenLaser() {
+                playSFX(boss_laser_spawnSound);
+                let zoneHeight = 60;
+                let zoneY = this.y + this.height / 2 - zoneHeight / 2;
+                let laser = new ScreenLaser(0, zoneY, GAME_WIDTH, zoneHeight, 60);
+                dangerZones.push(laser);
+            }
+
+            shootProjectiles() {
+                projectiles.push({
+                    x: this.x + this.width / 2,
+                    y: this.y + this.height / 2,
+                    vx: -3.5,
+                    vy: (Math.random() - 0.5) * 3,
+                    width: 16,
+                    height: 16
+                });
+            }
+
+            update() {
+                if (!this.active) return;
+
+                if (this.state === "INTRO") {
+                    if (this.y < this.targetY) {
+                        this.y += 2.5;
+                    } else {
+                        this.introTimer++;
+                        if (this.introTimer > 90) {
+                            this.state = "FIGHT";
+                        }
+                    }
+                } else if (this.state === "FIGHT") {
+                    let targetY = bird.y + bird.height / 2 - this.height / 2;
+                    let minY = 20;
+                    let maxY = GAME_HEIGHT - ground.height - this.height;
+                    targetY = Math.max(minY, Math.min(maxY, targetY));
+
+                    this.y += (targetY - this.y) * 0.04;
+                    this.attackTimer++;
+
+                    if (this.attackTimer % 90 === 0) {
+                        this.shootProjectiles();
+                    }
+                    if (this.attackTimer % 180 === 0) {
+                        this.castScreenLaser();
+                    }
+                }
+            }
+
+            draw() {
+                if (!this.active) return;
+
+                ctx.save();
+                if (bossImg.complete && bossImg.naturalWidth > 0) {
+                    ctx.drawImage(bossImg, this.x, this.y, this.width, this.height);
+                } else {
+                    ctx.fillStyle = this.state === "INTRO" ? "orange" : "red";
+                    ctx.fillRect(this.x, this.y, this.width, this.height);
+                }
+
+                if (this.state === "INTRO") {
+                    ctx.fillStyle = "white";
+                    ctx.font = "bold 16px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText("WARNING: DARK KNIGHT APPROACHES", GAME_WIDTH / 2, 50);
+                }
+
+                if (this.state === "FIGHT") {
+                    let barW = 200;
+                    let barH = 12;
+                    let barX = (GAME_WIDTH - barW) / 2;
+                    let barY = 20;
+
+                    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                    ctx.fillRect(barX, barY, barW, barH);
+
+                    let currentHpW = (this.hp / this.maxHp) * barW;
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fillRect(barX, barY, currentHpW, barH);
+
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(barX, barY, barW, barH);
+                }
+                ctx.restore();
+            }
+        }
+
+        const boss = new Boss(GAME_WIDTH - 120, 150);
+        let darkKnight = {
+            x: GAME_WIDTH + 50,
+            y: 0,
+            width: 50,
+            height: 30,
+            speed: 7,
+            active: false,
+            parried: false,
+            rotation: 0,
+            trail: [],
+
+            spawn() {
+                if (score < currentMode.birdScore) return;
+                this.x = boss.active ? boss.x : GAME_WIDTH;
+                this.y = bird.y + bird.height / 2 - this.height / 2;
+                this.active = true;
+                this.parried = false;
+                this.trail = [];
+
+                birdSpawnSound.currentTime = 0;
+                birdSpawnSound.play().catch(e => {});
+            },
+
+            update() {
+                if (!this.active) return;
+
+                this.trail.push({ x: this.x, y: this.y, rotation: this.rotation });
+                if (this.trail.length > 8) this.trail.shift();
+
+                if (!this.parried) {
+                    this.x -= this.speed;
+                    this.y += (bird.y - this.y) * 0.03;
+
+                    const dx = bird.x - this.x;
+                    const dy = bird.y - this.y;
+                    this.rotation = Math.atan2(dy, dx) + Math.PI;
+
+                    if (Math.abs(this.x - bird.x) < 25 && Math.abs(this.y - bird.y) < 25) {
+                        triggerGameOver();
+                    }
+                    if (this.x < -50) this.active = false;
+                } else {
+                    this.x += this.speed * 2.5;
+                    const targetX = boss.active ? boss.x : GAME_WIDTH + 100;
+                    
+                    if (boss.active) {
+                        this.y += (boss.y + boss.height / 2 - this.y) * 0.1;
+                    }
+                    this.rotation = 0;
+
+                    if (this.x >= targetX) {
+                        if (boss.active) {
+                            boss.hp--;
+                            if (boss.hp <= 0) {
+                                score += 30;
+                                if (score > highScore) {
+                                    highScore = score;
+                                    localStorage.setItem('flappy_high_score', highScore);
+                                }
+                                boss.active = false;
+                                this.active = false;
+                                triggerVictory();
+                                return;
+                            }
+                        }
+                        this.active = false;
+                    }
+                }
+            },
+
+            tryParry() {
+                if (!this.active || this.parried) return false;
+
+                const distance = Math.abs(this.x - bird.x);
+                const PERFECT_TIMING_WINDOW = 65; 
+
+                if (distance <= PERFECT_TIMING_WINDOW) {
+                    this.parried = true;
+                    bird.parryAnimTimer = 20; 
+                    parrySound.currentTime = 0;
+                    parrySound.play().catch(e => {});
+                    return 'SUCCESS';
+                } else {
+                    bird.missParryAnimTimer = 25;
+                    bird.hitAnimTimer = 25;
+                    return 'MISS';
+                }
+            },
+
+            draw() {
+                if (!this.active) return;
+
+                ctx.save();
+                for (let i = 0; i < this.trail.length; i++) {
+                    const pos = this.trail[i];
+                    const alpha = (i + 1) / (this.trail.length + 1) * 0.4;
+                    ctx.globalAlpha = alpha;
+                    ctx.save();
+                    ctx.translate(pos.x + this.width / 2, pos.y + this.height / 2);
+                    ctx.rotate(pos.rotation);
+                    if (this.parried) ctx.scale(-1, 1);
+                    ctx.drawImage(darkKnightImg, -this.width / 2, -this.height / 2, this.width, this.height);
+                    ctx.restore();
+                }
+
+                ctx.globalAlpha = 1.0;
+                ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+                ctx.rotate(this.rotation);
+                if (this.parried) ctx.scale(-1, 1);
+                
+                if (darkKnightImg.complete && darkKnightImg.naturalWidth !== 0) {
+                    ctx.drawImage(darkKnightImg, -this.width / 2, -this.height / 2, this.width, this.height);
+                } else {
+                    ctx.fillStyle = this.parried ? '#eab308' : '#000000';
+                    ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+                }
+
+                ctx.restore();
+            }
+        };
+
+        class Ground {
+            constructor() {
+                this.x = 0;
+                this.y = GAME_HEIGHT - 65;
+                this.width = GAME_WIDTH;
+                this.height = 65;
+            }
+            update() {
+                if (currentState === STATES.PLAYING && !bird.isDead) {
+                    this.x = (this.x - PIPE_SPEED) % 32;
+                }
+            }
+            draw() {
+                ctx.save();
+                ctx.fillStyle = '#451a03';
+                ctx.fillRect(0, this.y + 16, GAME_WIDTH, this.height - 16);
+
+                ctx.fillStyle = '#78350f';
+                for (let i = this.x - 32; i < GAME_WIDTH + 32; i += 32) {
+                    ctx.fillRect(i, this.y + 24, 12, 10);
+                    ctx.fillRect(i + 16, this.y + 40, 10, 12);
+                }
+
+                ctx.fillStyle = '#15803d';
+                ctx.fillRect(0, this.y + 10, GAME_WIDTH, 6);
+
+                ctx.fillStyle = '#4ade80';
+                ctx.fillRect(0, this.y, GAME_WIDTH, 10);
+
+                ctx.fillStyle = '#22c55e';
+                for (let i = this.x - 32; i < GAME_WIDTH + 32; i += 32) {
+                    ctx.fillRect(i, this.y - 3, 6, 4);
+                    ctx.fillRect(i + 8, this.y - 5, 4, 6);
+                    ctx.fillRect(i + 16, this.y - 3, 6, 4);
+                    ctx.fillRect(i + 24, this.y - 5, 4, 6);
+                }
+
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(0, this.y);
+                ctx.lineTo(GAME_WIDTH, this.y);
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+        const ground = new Ground();
+        let pipePairs = [];
+
+        function spawnPipePair() {
+            if (currentMode.isBossOnly || score >= currentMode.bossScore || boss.active) return;
+            const minHeight = 60;
+            const maxHeight = GAME_HEIGHT - ground.height - GAP_SIZE - minHeight;
+            const topHeight = Math.floor(Math.random() * (maxHeight - minHeight + 1)) + minHeight;
+            const pipeWidth = 52;
+            pipePairs.push({
+                x: GAME_WIDTH,
+                width: pipeWidth,
+                topHeight: topHeight,
+                bottomY: topHeight + GAP_SIZE,
+                bottomHeight: GAME_HEIGHT - ground.height - (topHeight + GAP_SIZE),
+                passed: false
+            });
+        }
+
+        function getEnvironmentObjects() {
+            const env = [];
+            env.push({ name: 'ceiling', x: 0, y: -50, width: GAME_WIDTH, height: 50 });
+            env.push({ name: 'ground', x: 0, y: ground.y, width: ground.width, height: ground.height });
+            pipePairs.forEach((pipe, index) => {
+                env.push({ name: `pipe_top_${index}`, x: pipe.x, y: 0, width: pipe.width, height: pipe.topHeight });
+                env.push({ name: `pipe_bottom_${index}`, x: pipe.x, y: pipe.bottomY, width: pipe.width, height: pipe.bottomHeight });
+            });
+            return env;
+        }
+
+        function updatePipes() {
+            if (currentState !== STATES.PLAYING || bird.isDead) return;
+            
+            if (score >= currentMode.bossScore && !boss.active) {
+                boss.spawnBoss();
+            }
+            if (frameCount % PIPE_SPAWN_RATE === 0) {
+                spawnPipePair();
+            }
+            pipePairs.forEach(pipe => {
+                pipe.x -= PIPE_SPEED;
+                if (!pipe.passed && pipe.x + pipe.width < bird.x) {
+                    score++;
+                    pipe.passed = true;
+                    if (score > highScore) {
+                        highScore = score;
+                        localStorage.setItem('flappy_high_score', highScore);
+                    }
+                }
+            });
+            pipePairs = pipePairs.filter(pipe => pipe.x + pipe.width > 0);
+        }
+
+        function drawPipes() {
+            pipePairs.forEach(pipe => {
+                drawSinglePipe(pipe.x, 0, pipe.width, pipe.topHeight, true);
+                drawSinglePipe(pipe.x, pipe.bottomY, pipe.width, pipe.bottomHeight, false);
+            });
+        }
+
+        function drawSinglePipe(x, y, width, height, isTop) {
+            ctx.save();
+            ctx.fillStyle = '#22c55e';
+            ctx.fillRect(x, y, width, height);
+            ctx.fillStyle = '#86efac';
+            ctx.fillRect(x + 4, y, 6, height);
+            ctx.fillStyle = '#15803d';
+            ctx.fillRect(x + width - 8, y, 6, height);
+            const capHeight = 24;
+            const capWidth = width + 8;
+            const capX = x - 4;
+            const capY = isTop ? height - capHeight : y;
+            ctx.fillStyle = '#22c55e';
+            ctx.fillRect(capX, capY, capWidth, capHeight);
+            ctx.fillStyle = '#86efac';
+            ctx.fillRect(capX + 4, capY, 6, capHeight);
+            ctx.fillStyle = '#15803d';
+            ctx.fillRect(capX + capWidth - 8, capY, 6, capHeight);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, width, height);
+            ctx.strokeRect(capX, capY, capWidth, capHeight);
+            ctx.restore();
+        }
+
+        function updateProjectilesAndZones() {
+            if (bird.isDead) return;
+            
+            dangerZones.forEach(zone => {
+                zone.update();
+                if (zone.checkCollision && zone.checkCollision(bird)) {
+                    triggerGameOver();
+                }
+            });
+            dangerZones = dangerZones.filter(zone => !zone.isFinished());
+            projectiles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                if (
+                    bird.x < p.x + p.width &&
+                    bird.x + bird.width > p.x &&
+                    bird.y < p.y + p.height &&
+                    bird.y + bird.height > p.y
+                ) {
+                    triggerGameOver();
+                }
+            });
+            projectiles = projectiles.filter(p => p.x > -20 && p.x < GAME_WIDTH + 20);
+        }
+
+        function drawProjectilesAndZones() {
+            dangerZones.forEach(zone => zone.draw(ctx));
+            projectiles.forEach(p => {
+                if (projectileImg.complete && projectileImg.naturalWidth > 0) {
+                    ctx.drawImage(projectileImg, p.x, p.y, p.width, p.height);
+                } else {
+                    ctx.fillStyle = '#a855f7';
+                    ctx.fillRect(p.x, p.y, p.width, p.height);
+                }
+            });
+        }
+
+        function checkCollisions() {
+            if (bird.isDead) return;
+            const environment = getEnvironmentObjects();
+            const padding = 3;
+            const birdBox = {
+                x: bird.x + padding,
+                y: bird.y + padding,
+                width: bird.width - padding * 2,
+                height: bird.height - padding * 2
+            };
+            for (let obj of environment) {
+                if (
+                    birdBox.x < obj.x + obj.width &&
+                    birdBox.x + birdBox.width > obj.x &&
+                    birdBox.y < obj.y + obj.height &&
+                    birdBox.y + birdBox.height > obj.y
+                ) {
+                    triggerGameOver();
+                    break;
+                }
+            }
+        }
+
+        function triggerGameOver() {
+            if (bird.isDead) return;
+            triggerScreenShake(30, 6);
+            bird.isDead = true;
+            bird.deathAnimTimer = 50;
+            bird.velocity = -4;
+            bird.hitAnimTimer = 25;
+            audioMgr.playFailMusic();
+        }
+
+        function triggerVictory() {
+            currentState = STATES.VICTORY;
+            dangerZones = [];
+            projectiles = [];
+            audioMgr.pauseMusic();
+        }
+
+        function exitGame() {
+            audioMgr.resetMusic();
+            window.close();
+            alert("Cảm ơn bạn đã chơi! Bạn có thể đóng tab trình duyệt này.");
+        }
+
+        function doParry() {
+            if (currentState === STATES.PLAYING && !bird.isDead) {
+                if (bird.parryCooldown > 0) return;
+
+                const result = darkKnight.tryParry();
+                if (result === 'SUCCESS') {
+                    triggerScreenShake(12, 3);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                    bird.parryCooldown = 0; 
+                } else {
+                    bird.parryCooldown = 80;
+                }
+            }
+        }
+
+        const buttons = {
+            start: { x: GAME_WIDTH / 2 - 90, y: 290, width: 180, height: 48, text: 'BẮT ĐẦU' },
+            howToPlay: { x: GAME_WIDTH / 2 - 90, y: 352, width: 180, height: 48, text: 'CÁCH CHƠI' },
+            exitStart: { x: GAME_WIDTH / 2 - 90, y: 414, width: 180, height: 48, text: 'THOÁT TRÒ CHƠI' },
+
+            backFromHelp: { x: GAME_WIDTH / 2 - 80, y: 485, width: 160, height: 45, text: 'QUAY LẠI' },
+
+            modeEasy: { x: GAME_WIDTH / 2 - 125, y: 180, width: 250, height: 52, text: 'EASY (Bird: 5 | Boss: 8)' },
+            modeMediums: { x: GAME_WIDTH / 2 - 125, y: 245, width: 250, height: 52, text: 'MEDIUMS (Bird: 8 | Boss: 13)' },
+            modeHards: { x: GAME_WIDTH / 2 - 125, y: 310, width: 250, height: 52, text: 'HARDS (Bird: 15 | Boss: 23)' },
+            modeBossOnly: { x: GAME_WIDTH / 2 - 125, y: 375, width: 250, height: 52, text: 'BOSS ONLY (Bird: 0 | Boss: 0)' },
+            backFromMode: { x: GAME_WIDTH / 2 - 80, y: 455, width: 160, height: 45, text: 'QUAY LẠI' },
+
+            restart: { x: GAME_WIDTH / 2 - 110, y: 365, width: 220, height: 48, text: 'CHƠI LẠI' },
+            toModeFromDead: { x: GAME_WIDTH / 2 - 110, y: 425, width: 220, height: 48, text: 'VỀ PHẦN LỰA CHỌN' },
+
+            toModeFromWin: { x: GAME_WIDTH / 2 - 110, y: 365, width: 220, height: 48, text: 'VỀ PHẦN LỰA CHỌN' },
+            exitWin: { x: GAME_WIDTH / 2 - 110, y: 425, width: 220, height: 48, text: 'THOÁT TRÒ CHƠI' },
+
+            pause: { x: GAME_WIDTH - 50, y: 15, width: 35, height: 35 },
+            parryBtn: { x: GAME_WIDTH - 95, y: GAME_HEIGHT - 70, width: 80, height: 45, text: 'PARRY' }
+        };
+
+        function drawBackground() {
+            if(bgImg.complete && bgImg.naturalWidth !== 0) {
+                ctx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+            } else {
+                ctx.fillStyle = '#70c5ce';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+            }
+        }
+
+        function drawButton(btn, color = '#f97316', shadowColor = '#9a3412', fontSize = 16) {
+            ctx.save();
+            ctx.fillStyle = shadowColor;
+            ctx.beginPath();
+            ctx.roundRect(btn.x, btn.y + 4, btn.width, btn.height, 10);
+            ctx.fill();
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 10);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${fontSize}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(btn.text, btn.x + btn.width / 2, btn.y + btn.height / 2);
+            ctx.restore();
+        }
+
+        function drawScore() {
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 5;
+            ctx.font = 'bold 36px Arial';
+            ctx.textAlign = 'center';
+
+            if (currentState === STATES.PLAYING || currentState === STATES.PAUSED) {
+                ctx.strokeText(score, GAME_WIDTH / 2, 60);
+                ctx.fillText(score, GAME_WIDTH / 2, 60);
+            }
+            ctx.restore();
+        }
+
+        function drawPauseButton() {
+            const btn = buttons.pause;
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(btn.x, btn.y, btn.width, btn.height, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#000000';
+            if (currentState === STATES.PLAYING) {
+                ctx.fillRect(btn.x + 10, btn.y + 8, 5, 18);
+                ctx.fillRect(btn.x + 20, btn.y + 8, 5, 18);
+            } else if (currentState === STATES.PAUSED) {
+                ctx.beginPath();
+                ctx.moveTo(btn.x + 12, btn.y + 8);
+                ctx.lineTo(btn.x + 26, btn.y + 17);
+                ctx.lineTo(btn.x + 12, btn.y + 26);
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function drawUI() {
+            ctx.save();
+            if (currentState === STATES.START) {
+                ctx.fillStyle = '#facc15';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 6;
+                ctx.font = 'bold 42px Arial';
+                ctx.textAlign = 'center';
+                ctx.strokeText('BIRDDY FLOP', GAME_WIDTH / 2, 180);
+                ctx.fillText('BIRDDY FLOP', GAME_WIDTH / 2, 180);
+
+                drawButton(buttons.start, '#f97316', '#9a3412', 17);
+                drawButton(buttons.howToPlay, '#3b82f6', '#1d4ed8', 17);
+                drawButton(buttons.exitStart, '#ef4444', '#b91c1c', 17);
+
+            } else if (currentState === STATES.HOW_TO_PLAY) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+                const panelW = 340;
+                const panelH = 400;
+                const panelX = (GAME_WIDTH - panelW) / 2;
+                const panelY = 65;
+
+                ctx.fillStyle = '#fef08a';
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.roundRect(panelX, panelY, panelW, panelH, 14);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#b45309';
+                ctx.font = 'bold 26px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('CÁCH CHƠI', GAME_WIDTH / 2, panelY + 40);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'left';
+                const lines = [
+                    "1. Điều khiển bay:",
+                    "   • Chạm màn hình / Click chuột / Phím Space",
+                    "   • Né các ống nước, mặt đất và trần nhà.",
+                    "",
+                    "2. Đỡ đòn (PARRY):",
+                    "   • Bấm nút PARRY (hoặc phím F / Shift)",
+                    "     đúng lúc Chim Bóng Đêm lao tới.",
+                    "   • Parry trượt sẽ bị hồi chiêu (Cooldown).",
+                    "",
+                    "3. Tiêu diệt Trùm Cuối:",
+                    "   • Phản đòn Chim Bóng Đêm trúng Boss",
+                    "     để gây sát thương (20 HP) và giành",
+                    "     chiến thắng!"
+                ];
+                lines.forEach((line, i) => {
+                    ctx.fillText(line, panelX + 20, panelY + 80 + i * 22);
+                });
+
+                drawButton(buttons.backFromHelp, '#64748b', '#334155', 16);
+
+            } else if (currentState === STATES.MODE_SELECT) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+                ctx.fillStyle = '#facc15';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 5;
+                ctx.font = 'bold 30px Arial';
+                ctx.textAlign = 'center';
+                ctx.strokeText('CHỌN CHẾ ĐỘ CHƠI', GAME_WIDTH / 2, 125);
+                ctx.fillText('CHỌN CHẾ ĐỘ CHƠI', GAME_WIDTH / 2, 125);
+
+                drawButton(buttons.modeEasy, '#22c55e', '#15803d', 15);
+                drawButton(buttons.modeMediums, '#f59e0b', '#b45309', 15);
+                drawButton(buttons.modeHards, '#ef4444', '#b91c1c', 15);
+                drawButton(buttons.modeBossOnly, '#a855f7', '#6b21a8', 15);
+                drawButton(buttons.backFromMode, '#64748b', '#334155', 16);
+
+            } else if (currentState === STATES.PAUSED) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 36px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('TẠM DỪNG', GAME_WIDTH / 2, GAME_HEIGHT / 2);
+                drawPauseButton();
+
+            } else if (currentState === STATES.GAMEOVER) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+                const panelW = 290;
+                const panelH = 180;
+                const panelX = (GAME_WIDTH - panelW) / 2;
+                const panelY = 155;
+                ctx.fillStyle = '#fef08a';
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.roundRect(panelX, panelY, panelW, panelH, 12);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 32px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER', GAME_WIDTH / 2, panelY + 42);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 17px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Chế độ: ${currentMode.name}`, panelX + 28, panelY + 82);
+                ctx.fillText(`Điểm hiện tại: ${score}`, panelX + 28, panelY + 114);
+                ctx.fillText(`Điểm cao nhất: ${highScore}`, panelX + 28, panelY + 146);
+
+                drawButton(buttons.restart, '#f97316', '#9a3412', 16);
+                drawButton(buttons.toModeFromDead, '#3b82f6', '#1d4ed8', 16);
+
+            } else if (currentState === STATES.VICTORY) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+                const panelW = 320;
+                const panelH = 195;
+                const panelX = (GAME_WIDTH - panelW) / 2;
+                const panelY = 145;
+
+                ctx.fillStyle = '#fef08a';
+                ctx.strokeStyle = '#eab308';
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.roundRect(panelX, panelY, panelW, panelH, 14);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#16a34a';
+                ctx.font = 'bold 30px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('BẠN ĐÃ THẮNG', GAME_WIDTH / 2, panelY + 45);
+
+                ctx.fillStyle = '#b45309';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText('TRÙM CUỐI ĐÃ BỊ ĐÁNH BẠI', GAME_WIDTH / 2, panelY + 80);
+
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(`Tổng điểm: ${score} | Kỷ lục: ${highScore}`, GAME_WIDTH / 2, panelY + 135);
+
+                drawButton(buttons.toModeFromWin, '#3b82f6', '#1d4ed8', 16);
+                drawButton(buttons.exitWin, '#ef4444', '#b91c1c', 16);
+            }
+
+            if (currentState === STATES.PLAYING) {
+                drawPauseButton();
+                drawButton(buttons.parryBtn, bird.parryCooldown > 0 ? '#64748b' : '#ef4444', '#9a3412', 16);
+                if (bird.parryCooldown > 0) {
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`COOLDOWN!`, GAME_WIDTH / 2, 100);
+                }
+            }
+            ctx.restore();
+        }
+
+        function isClicked(x, y, btn) {
+            return x >= btn.x && x <= btn.x + btn.width &&
+                   y >= btn.y && y <= btn.y + btn.height;
+        }
+
+        function getActiveButtons() {
+            switch (currentState) {
+                case STATES.START:
+                    return [buttons.start, buttons.howToPlay, buttons.exitStart];
+                case STATES.HOW_TO_PLAY:
+                    return [buttons.backFromHelp];
+                case STATES.MODE_SELECT:
+                    return [buttons.modeEasy, buttons.modeMediums, buttons.modeHards, buttons.modeBossOnly, buttons.backFromMode];
+                case STATES.PLAYING:
+                    return [buttons.pause, buttons.parryBtn];
+                case STATES.PAUSED:
+                    return [buttons.pause];
+                case STATES.GAMEOVER:
+                    return [buttons.restart, buttons.toModeFromDead];
+                case STATES.VICTORY:
+                    return [buttons.toModeFromWin, buttons.exitWin];
+                default:
+                    return [];
+            }
+        }
+
+        let hoveredButton = null;
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const canvasX = (e.clientX - rect.left) * scaleX;
+            const canvasY = (e.clientY - rect.top) * scaleY;
+
+            const activeBtns = getActiveButtons();
+            let currentHover = null;
+
+            for (let btn of activeBtns) {
+                if (isClicked(canvasX, canvasY, btn)) {
+                    currentHover = btn;
+                    break;
+                }
+            }
+
+            if (currentHover && currentHover !== hoveredButton) {
+                playSFX(mouse_await);
+                canvas.style.cursor = 'pointer';
+            } else if (!currentHover) {
+                canvas.style.cursor = 'default';
+            }
+            hoveredButton = currentHover;
+        });
+
+        function handleInput(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const canvasX = (clientX - rect.left) * scaleX;
+            const canvasY = (clientY - rect.top) * scaleY;
+
+            if (currentState === STATES.DISCLAIMER) {
+                playSFX(menu_clicked);
+                currentState = STATES.START;
+                return;
+            }
+
+            if (currentState === STATES.PLAYING) {
+                if (isClicked(canvasX, canvasY, buttons.parryBtn)) {
+                    playSFX(menu_clicked);
+                    doParry();
+                    return;
+                }
+                if (isClicked(canvasX, canvasY, buttons.pause)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.PAUSED;
+                    audioMgr.pauseMusic();
+                    return;
+                }
+                bird.flap();
+            } else if (currentState === STATES.PAUSED) {
+                if (isClicked(canvasX, canvasY, buttons.pause)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.PLAYING;
+                    audioMgr.resumeMusic();
+                    return;
+                }
+            } else if (currentState === STATES.START) {
+                if (isClicked(canvasX, canvasY, buttons.start)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.MODE_SELECT;
+                } else if (isClicked(canvasX, canvasY, buttons.howToPlay)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.HOW_TO_PLAY;
+                } else if (isClicked(canvasX, canvasY, buttons.exitStart)) {
+                    playSFX(menu_clicked);
+                    exitGame();
+                }
+            } else if (currentState === STATES.HOW_TO_PLAY) {
+                if (isClicked(canvasX, canvasY, buttons.backFromHelp)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.START;
+                }
+            } else if (currentState === STATES.MODE_SELECT) {
+                if (isClicked(canvasX, canvasY, buttons.modeEasy)) {
+                    playSFX(menu_clicked);
+                    currentMode = MODES.EASY;
+                    resetGame();
+                    startGame();
+                } else if (isClicked(canvasX, canvasY, buttons.modeMediums)) {
+                    playSFX(menu_clicked);
+                    currentMode = MODES.MEDIUMS;
+                    resetGame();
+                    startGame();
+                } else if (isClicked(canvasX, canvasY, buttons.modeHards)) {
+                    playSFX(menu_clicked);
+                    currentMode = MODES.HARDS;
+                    resetGame();
+                    startGame();
+                } else if (isClicked(canvasX, canvasY, buttons.modeBossOnly)) {
+                    playSFX(menu_clicked);
+                    currentMode = MODES.BOSS_ONLY;
+                    resetGame();
+                    startGame();
+                } else if (isClicked(canvasX, canvasY, buttons.backFromMode)) {
+                    playSFX(menu_clicked);
+                    currentState = STATES.START;
+                }
+            } else if (currentState === STATES.GAMEOVER) {
+                if (isClicked(canvasX, canvasY, buttons.restart)) {
+                    playSFX(menu_clicked);
+                    resetGame();
+                    startGame();
+                } else if (isClicked(canvasX, canvasY, buttons.toModeFromDead)) {
+                    playSFX(menu_clicked);
+                    resetGame();
+                    currentState = STATES.MODE_SELECT;
+                }
+            } else if (currentState === STATES.VICTORY) {
+                if (isClicked(canvasX, canvasY, buttons.toModeFromWin)) {
+                    playSFX(menu_clicked);
+                    resetGame();
+                    currentState = STATES.MODE_SELECT;
+                } else if (isClicked(canvasX, canvasY, buttons.exitWin)) {
+                    playSFX(menu_clicked);
+                    exitGame();
+                }
+            }
+        }
+
+        function startGame() {
+            currentState = STATES.PLAYING;
+            if (currentMode.isBossOnly) {
+                boss.spawnBoss();
+            } else {
+                audioMgr.playNormalMusic();
+            }
+            bird.flap();
+        }
+
+        function resetGame() {
+            score = 0;
+            pipePairs = [];
+            dangerZones = [];
+            projectiles = [];
+            frameCount = 0;
+            bird.reset();
+            boss.active = false;
+            boss.maxHp = currentMode.bossHp;
+            boss.hp = boss.maxHp;
+            boss.x = GAME_WIDTH + 100;
+            darkKnight.active = false;
+            audioMgr.resetMusic();
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (currentState === STATES.START) {
+                    currentState = STATES.MODE_SELECT;
+                } else if (currentState === STATES.PLAYING) {
+                    bird.flap();
+                } else if (currentState === STATES.GAMEOVER) {
+                    resetGame();
+                    startGame();
+                }
+            }
+            if (e.code === 'KeyF' || e.code === 'ShiftLeft') {
+                doParry();
+            }
+        });
+
+        canvas.addEventListener('mousedown', (e) => handleInput(e.clientX, e.clientY));
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length > 0) {
+                handleInput(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: false });
+
+        function gameLoop() {
+            frameCount++;
+            if (screenShakeTimer > 0) {
+                screenShakeTimer--;
+            }
+            if(currentState === STATES.DISCLAIMER){
+                updateDisclaimer();
+            } else if(currentState === STATES.INTRO){
+                updateIntro();
+            } else if (currentState === STATES.PLAYING) {
+                bird.update();
+                
+                if (bird.isDead) {
+                    if (bird.deathAnimTimer <= 0 || bird.y > GAME_HEIGHT) {
+                        currentState = STATES.GAMEOVER;
+                    }
+                } else {
+                    updatePipes();
+                    checkCollisions();
+                    boss.update();
+                    darkKnight.update();
+                    updateProjectilesAndZones();
+                    
+                    if (score >= currentMode.birdScore && !darkKnight.active) {
+                        let spawnInterval = Math.max(60, 180 - (score - 10) * 4);
+                        if (frameCount % Math.floor(spawnInterval) === 0) {
+                            darkKnight.spawn();
+                        }
+                    }
+                }
+            }
+            ground.update();
+            ctx.save();
+            if (screenShakeTimer > 0) {
+                let offsetX = (Math.random() - 0.5) * screenShakeMagnitude;
+                let offsetY = (Math.random() - 0.5) * screenShakeMagnitude;
+                ctx.translate(offsetX, offsetY);
+            }
+            drawBackground();
+            if (currentState === STATES.DISCLAIMER) {
+                drawDisclaimer();
+            } else if(currentState === STATES.INTRO){
+                drawIntro();
+            } else {
+                drawPipes();
+                ground.draw();
+                drawProjectilesAndZones();
+                boss.draw();
+                darkKnight.draw();
+                bird.draw();
+                drawScore();
+                drawUI();
+            }
+            ctx.restore();
+            requestAnimationFrame(gameLoop);
+        }
+        gameLoop();
+    </script>
+</body>
+</html>
